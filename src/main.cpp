@@ -38,9 +38,10 @@
 #endif
 
 template <typename T> struct UINode;
+struct QuadTree;
 void do_checks(SDL_Surface *);
-void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, float, float,
-          float);
+void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, const QuadTree &,
+          float, float, float);
 
 template <typename T> struct UINode {
   T data;
@@ -125,6 +126,94 @@ template <typename T> struct UINode {
   }
 };
 
+struct Rect {
+  float x1, y1, x2, y2;
+  bool intersects(const Rect &other) const {
+    return !(x2 < other.x1 || x1 > other.x2 || y2 < other.y1 || y1 > other.y2);
+  }
+  bool contains(float x, float y) const {
+    return x >= x1 && x <= x2 && y >= y1 && y <= y2;
+  }
+};
+
+struct QuadTree {
+  static const int CAPACITY = 16;
+  Rect boundary;
+  std::vector<int> indices;
+  QuadTree *nw, *ne, *sw, *se;
+  const std::vector<UINode<Uint32>> &nodes_ref;
+
+  QuadTree(Rect b, const std::vector<UINode<Uint32>> &nodes)
+      : boundary(b), nw(nullptr), ne(nullptr), sw(nullptr), se(nullptr),
+        nodes_ref(nodes) {}
+  ~QuadTree() {
+    delete nw;
+    delete ne;
+    delete sw;
+    delete se;
+  }
+
+  void subdivide() {
+    float mx = (boundary.x1 + boundary.x2) / 2.0f;
+    float my = (boundary.y1 + boundary.y2) / 2.0f;
+    nw = new QuadTree({boundary.x1, boundary.y1, mx, my}, nodes_ref);
+    ne = new QuadTree({mx, boundary.y1, boundary.x2, my}, nodes_ref);
+    sw = new QuadTree({boundary.x1, my, mx, boundary.y2}, nodes_ref);
+    se = new QuadTree({mx, my, boundary.x2, boundary.y2}, nodes_ref);
+  }
+
+  bool insert(int idx) {
+    float x = nodes_ref[idx].x;
+    float y = nodes_ref[idx].y;
+    if (!boundary.contains(x, y))
+      return false;
+
+    if (nw == nullptr) {
+      if (indices.size() < CAPACITY) {
+        indices.push_back(idx);
+        return true;
+      }
+      subdivide();
+      for (int stored_idx : indices) {
+        if (!nw->insert(stored_idx))
+          if (!ne->insert(stored_idx))
+            if (!sw->insert(stored_idx))
+              se->insert(stored_idx);
+      }
+      indices.clear();
+    }
+
+    if (nw->insert(idx))
+      return true;
+    if (ne->insert(idx))
+      return true;
+    if (sw->insert(idx))
+      return true;
+    if (se->insert(idx))
+      return true;
+    return false;
+  }
+
+  void query(const Rect &range, std::vector<int> &found) const {
+    if (!boundary.intersects(range))
+      return;
+    if (nw == nullptr) {
+      for (int idx : indices) {
+        float x = nodes_ref[idx].x;
+        float y = nodes_ref[idx].y;
+        if (range.contains(x, y)) {
+          found.push_back(idx);
+        }
+      }
+      return;
+    }
+    nw->query(range, found);
+    ne->query(range, found);
+    sw->query(range, found);
+    se->query(range, found);
+  }
+};
+
 std::vector<UINode<Uint32>> generate_random_nodes(int count, int max_w,
                                                   int max_h) {
   std::vector<UINode<Uint32>> nodes;
@@ -185,6 +274,19 @@ int main() {
     nodes[i].y = GA.y(ogdf_nodes[i]);
   }
 
+  // Populate Quadtree for spatial querying
+  float min_x = 0, min_y = 0, max_x = WIDTH, max_y = HEIGHT;
+  for (const auto &n : nodes) {
+    min_x = n.x < min_x ? n.x : min_x;
+    min_y = n.y < min_y ? n.y : min_y;
+    max_x = n.x > max_x ? n.x : max_x;
+    max_y = n.y > max_y ? n.y : max_y;
+  }
+  QuadTree qtree({min_x - 100, min_y - 100, max_x + 100, max_y + 100}, nodes);
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    qtree.insert((int)i);
+  }
+
   bool quit = false;
   float pan_x = 0.0f;
   float pan_y = 0.0f;
@@ -214,7 +316,15 @@ int main() {
           float my = event.button.y;
           bool clicked_on_node = false;
 
-          for (int i = (int)nodes.size() - 1; i >= 0; --i) {
+          float click_orig_x = (mx / zoom) - pan_x;
+          float click_orig_y = (my / zoom) - pan_y;
+          std::vector<int> hit_candidates;
+          float search_pad = 200.0f; // maximum width of node / zoom
+          qtree.query({click_orig_x - search_pad, click_orig_y - search_pad,
+                       click_orig_x + search_pad, click_orig_y + search_pad},
+                      hit_candidates);
+
+          for (int i : hit_candidates) {
             float scaled_x = (nodes[i].x + pan_x) * zoom;
             float scaled_y = (nodes[i].y + pan_y) * zoom;
             float scaled_w = nodes[i].width * zoom;
@@ -254,7 +364,7 @@ int main() {
     if (surface) {
       SDL_FillSurfaceRect(surface, NULL, 0); // Clear to black
       do_checks(surface);
-      draw(surface, nodes, pan_x, pan_y, zoom);
+      draw(surface, nodes, qtree, pan_x, pan_y, zoom);
       SDL_UpdateWindowSurface(window);
     }
   }
@@ -276,7 +386,7 @@ void do_checks(SDL_Surface *surface) {
 }
 
 void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
-          float pan_x, float pan_y, float zoom) {
+          const QuadTree &qtree, float pan_x, float pan_y, float zoom) {
 #if 0
 #ifndef DEBUG
   void *pixels = surface->pixels;
@@ -301,7 +411,23 @@ void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
   }
 #endif
 
-  for (size_t i = 0; i < nodes.size(); ++i) {
-    nodes[i].render(surface, pan_x, pan_y, zoom);
+  float max_w = 200.0f; // Padding larger than max expected node size
+  float orig_x1 = -pan_x - (max_w / zoom);
+  float orig_y1 = -pan_y - (max_w / zoom);
+  float orig_x2 = orig_x1 + (surface->w / zoom) + 2.0f * (max_w / zoom);
+  float orig_y2 = orig_y1 + (surface->h / zoom) + 2.0f * (max_w / zoom);
+
+  std::vector<int> visible;
+  qtree.query({orig_x1, orig_y1, orig_x2, orig_y2}, visible);
+
+  static size_t last_visible_count = -1;
+  if (visible.size() != last_visible_count) {
+    log("Rendering: %zu / %zu nodes (%.1f%%)\n", visible.size(), nodes.size(),
+        (float)visible.size() / nodes.size() * 100.0f);
+    last_visible_count = visible.size();
+  }
+
+  for (int idx : visible) {
+    nodes[idx].render(surface, pan_x, pan_y, zoom);
   }
 }
