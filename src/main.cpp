@@ -40,7 +40,7 @@
 template <typename T> struct UINode;
 struct QuadTree;
 void do_checks(SDL_Surface *);
-void draw_selected_node_widget(SDL_Surface *, Uint32);
+void draw_text_widget(SDL_Surface *, int, int, Uint32);
 void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, const QuadTree &,
           float, float, float);
 
@@ -296,7 +296,13 @@ int main() {
   bool has_selection = false;
   Uint32 selected_data = 0;
 
+  Uint32 frame_count = 0;
+  Uint32 last_time = SDL_GetTicks();
+  Uint32 current_fps = 0;
+
   while (!quit) {
+    Uint32 frame_start = SDL_GetTicks();
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_EVENT_QUIT) {
@@ -373,10 +379,26 @@ int main() {
       draw(surface, nodes, qtree, pan_x, pan_y, zoom);
 
       if (has_selection) {
-        draw_selected_node_widget(surface, selected_data);
+        draw_text_widget(surface, 10, 10, selected_data);
       }
 
+      frame_count++;
+      Uint32 current_time = SDL_GetTicks();
+      if (current_time > last_time + 1000) {
+        current_fps = frame_count;
+        frame_count = 0;
+        last_time = current_time;
+      }
+
+      // Render FPS meter in top right
+      draw_text_widget(surface, surface->w - 100, 10, current_fps);
+
       SDL_UpdateWindowSurface(window);
+    }
+
+    Uint32 frame_time = SDL_GetTicks() - frame_start;
+    if (frame_time < 16) {
+      SDL_Delay(16 - frame_time);
     }
   }
 
@@ -480,7 +502,7 @@ void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
   }
 }
 
-void draw_selected_node_widget(SDL_Surface *surface, Uint32 data) {
+void draw_text_widget(SDL_Surface *surface, int x, int y, Uint32 data) {
   const SDL_PixelFormatDetails *format =
       SDL_GetPixelFormatDetails(surface->format);
   Uint32 bg_color = SDL_MapRGB(format, NULL, 50, 50, 50);
@@ -495,7 +517,7 @@ void draw_selected_node_widget(SDL_Surface *surface, Uint32 data) {
   for (int i = 0; buf[i] != '\0'; ++i)
     num_chars++;
 
-  SDL_Rect bg = {10, 10, 20 + num_chars * (4 * scale), 20 + (5 * scale)};
+  SDL_Rect bg = {x, y, 20 + num_chars * (4 * scale), 20 + (5 * scale)};
   SDL_FillSurfaceRect(surface, &bg, bg_color);
 
   const Uint8 font[10][15] = {
@@ -511,8 +533,8 @@ void draw_selected_node_widget(SDL_Surface *surface, Uint32 data) {
       {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1}  // 9
   };
 
-  int cursor_x = 20;
-  int cursor_y = 20;
+  int cursor_x = x + 10;
+  int cursor_y = y + 10;
 
   for (int i = 0; buf[i] != '\0'; ++i) {
     if (buf[i] < '0' || buf[i] > '9')
