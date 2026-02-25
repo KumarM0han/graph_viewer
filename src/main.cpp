@@ -40,7 +40,7 @@
 template <typename T> struct UINode;
 struct QuadTree;
 void do_checks(SDL_Surface *);
-void draw_text_widget(SDL_Surface *, int, int, Uint32);
+void draw_string_widget(SDL_Surface *, int, int, const char *, Uint32, Uint32);
 void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, const QuadTree &,
           float, float, float);
 
@@ -296,6 +296,11 @@ int main() {
   bool has_selection = false;
   Uint32 selected_data = 0;
 
+  bool is_searching = false;
+  char search_buffer[32] = {0};
+  int search_len = 0;
+  Uint32 search_failed_time = 0;
+
   Uint32 frame_count = 0;
   Uint32 last_time = SDL_GetTicks();
   Uint32 current_fps = 0;
@@ -319,47 +324,56 @@ int main() {
           zoom = 10.0f;
       } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         if (event.button.button == SDL_BUTTON_LEFT) {
-          is_dragging = true;
-
           float mx = event.button.x;
           float my = event.button.y;
-          bool clicked_on_node = false;
+          SDL_Surface *s = SDL_GetWindowSurface(window);
+          SDL_Rect find_btn = {s ? s->w / 2 - 40 : WIDTH / 2 - 40, 10, 80, 40};
 
-          float click_orig_x = (mx / zoom) - pan_x;
-          float click_orig_y = (my / zoom) - pan_y;
-          std::vector<int> hit_candidates;
-          float search_pad = 200.0f; // maximum width of node / zoom
-          qtree.query({click_orig_x - search_pad, click_orig_y - search_pad,
-                       click_orig_x + search_pad, click_orig_y + search_pad},
-                      hit_candidates);
+          if (mx >= find_btn.x && mx <= find_btn.x + find_btn.w &&
+              my >= find_btn.y && my <= find_btn.y + find_btn.h) {
+            is_searching = true;
+            search_len = 0;
+            search_buffer[0] = '\0';
+          } else {
+            is_dragging = true;
+            bool clicked_on_node = false;
 
-          for (int i : hit_candidates) {
-            float scaled_x = (nodes[i].x + pan_x) * zoom;
-            float scaled_y = (nodes[i].y + pan_y) * zoom;
-            float scaled_w = nodes[i].width * zoom;
-            float scaled_h = nodes[i].height * zoom;
+            float click_orig_x = (mx / zoom) - pan_x;
+            float click_orig_y = (my / zoom) - pan_y;
+            std::vector<int> hit_candidates;
+            float search_pad = 200.0f; // maximum width of node / zoom
+            qtree.query({click_orig_x - search_pad, click_orig_y - search_pad,
+                         click_orig_x + search_pad, click_orig_y + search_pad},
+                        hit_candidates);
 
-            float hw = scaled_w / 2.0f;
-            float hh = scaled_h / 2.0f;
+            for (int i : hit_candidates) {
+              float scaled_x = (nodes[i].x + pan_x) * zoom;
+              float scaled_y = (nodes[i].y + pan_y) * zoom;
+              float scaled_w = nodes[i].width * zoom;
+              float scaled_h = nodes[i].height * zoom;
 
-            if (mx >= scaled_x - hw && mx <= scaled_x + hw &&
-                my >= scaled_y - hh && my <= scaled_y + hh) {
+              float hw = scaled_w / 2.0f;
+              float hh = scaled_h / 2.0f;
 
+              if (mx >= scaled_x - hw && mx <= scaled_x + hw &&
+                  my >= scaled_y - hh && my <= scaled_y + hh) {
+
+                for (auto &n : nodes)
+                  n.selected = false;
+                nodes[i].selected = true;
+                clicked_on_node = true;
+                has_selection = true;
+                selected_data = nodes[i].data;
+                break;
+              }
+            }
+
+            if (!clicked_on_node) {
               for (auto &n : nodes)
                 n.selected = false;
-              nodes[i].selected = true;
-              clicked_on_node = true;
-              has_selection = true;
-              selected_data = nodes[i].data;
-              break;
+              has_selection = false;
             }
-          }
-
-          if (!clicked_on_node) {
-            for (auto &n : nodes)
-              n.selected = false;
-            has_selection = false;
-          }
+          } // end else for search button click
         }
       } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         if (event.button.button == SDL_BUTTON_LEFT)
@@ -368,6 +382,54 @@ int main() {
         if (is_dragging) {
           pan_x += event.motion.xrel / zoom;
           pan_y += event.motion.yrel / zoom;
+        }
+      } else if (event.type == SDL_EVENT_KEY_DOWN) {
+        if (event.key.key == SDLK_F && (event.key.mod & SDL_KMOD_CTRL)) {
+          is_searching = true;
+          search_len = 0;
+          search_buffer[0] = '\0';
+        } else if (is_searching) {
+          if (event.key.key == SDLK_ESCAPE) {
+            is_searching = false;
+          } else if (event.key.key == SDLK_BACKSPACE && search_len > 0) {
+            search_len--;
+            search_buffer[search_len] = '\0';
+          } else if (event.key.key == SDLK_RETURN ||
+                     event.key.key == SDLK_KP_ENTER) {
+            if (search_len > 0) {
+              Uint32 target_data = (Uint32)atol(search_buffer);
+              bool found = false;
+              for (int i = 0; i < (int)nodes.size(); ++i) {
+                if (nodes[i].data == target_data) {
+                  for (auto &n : nodes)
+                    n.selected = false;
+                  nodes[i].selected = true;
+                  has_selection = true;
+                  selected_data = nodes[i].data;
+                  SDL_Surface *s = SDL_GetWindowSurface(window);
+                  float hw = s ? s->w / 2.0f : WIDTH / 2.0f;
+                  float hh = s ? s->h / 2.0f : HEIGHT / 2.0f;
+                  pan_x = -nodes[i].x + hw / zoom;
+                  pan_y = -nodes[i].y + hh / zoom;
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                log("Node with data %u not found\n", target_data);
+                search_failed_time = SDL_GetTicks();
+              }
+            }
+            is_searching = false;
+          } else if (event.key.key >= SDLK_0 && event.key.key <= SDLK_9 &&
+                     search_len < 31) {
+            search_buffer[search_len++] = '0' + (event.key.key - SDLK_0);
+            search_buffer[search_len] = '\0';
+          } else if (event.key.key >= SDLK_KP_0 && event.key.key <= SDLK_KP_9 &&
+                     search_len < 31) {
+            search_buffer[search_len++] = '0' + (event.key.key - SDLK_KP_0);
+            search_buffer[search_len] = '\0';
+          }
         }
       }
     }
@@ -378,8 +440,35 @@ int main() {
       do_checks(surface);
       draw(surface, nodes, qtree, pan_x, pan_y, zoom);
 
+      const SDL_PixelFormatDetails *format =
+          SDL_GetPixelFormatDetails(surface->format);
+      Uint32 bg_color = SDL_MapRGB(format, NULL, 50, 50, 50);
+      Uint32 fg_color = SDL_MapRGB(format, NULL, 255, 255, 255);
+      Uint32 active_bg = SDL_MapRGB(format, NULL, 80, 150, 80);
+
       if (has_selection) {
-        draw_text_widget(surface, 10, 10, selected_data);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%u", selected_data);
+        draw_string_widget(surface, 10, 10, buf, bg_color, fg_color);
+      }
+
+      // Draw Find button
+      draw_string_widget(surface, surface->w / 2 - 40, 10, "FIND",
+                         is_searching ? active_bg : bg_color, fg_color);
+
+      if (is_searching) {
+        char input_buf[64];
+        snprintf(input_buf, sizeof(input_buf), "INPUT: %s", search_buffer);
+        draw_string_widget(surface, surface->w / 2 - (10 * 4 * 4), 60,
+                           input_buf, active_bg, fg_color);
+      } else if (search_failed_time > 0) {
+        if (SDL_GetTicks() - search_failed_time < 2000) {
+          Uint32 error_bg = SDL_MapRGB(format, NULL, 180, 50, 50);
+          draw_string_widget(surface, surface->w / 2 - (9 * 4 * 4 / 2), 60,
+                             "NOT FOUND", error_bg, fg_color);
+        } else {
+          search_failed_time = 0;
+        }
       }
 
       frame_count++;
@@ -391,7 +480,10 @@ int main() {
       }
 
       // Render FPS meter in top right
-      draw_text_widget(surface, surface->w - 100, 10, current_fps);
+      char fps_buf[16];
+      snprintf(fps_buf, sizeof(fps_buf), "%u", current_fps);
+      draw_string_widget(surface, surface->w - 80, 10, fps_buf, bg_color,
+                         fg_color);
 
       SDL_UpdateWindowSurface(window);
     }
@@ -502,25 +594,17 @@ void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
   }
 }
 
-void draw_text_widget(SDL_Surface *surface, int x, int y, Uint32 data) {
-  const SDL_PixelFormatDetails *format =
-      SDL_GetPixelFormatDetails(surface->format);
-  Uint32 bg_color = SDL_MapRGB(format, NULL, 50, 50, 50);
-  Uint32 fg_color = SDL_MapRGB(format, NULL, 255, 255, 255);
-
-  char buf[32];
-  snprintf(buf, sizeof(buf), "%u", data);
-
-  // Create a tight background box behind the number
+void draw_string_widget(SDL_Surface *surface, int x, int y, const char *str,
+                        Uint32 bg_color, Uint32 fg_color) {
   int scale = 4;
   int num_chars = 0;
-  for (int i = 0; buf[i] != '\0'; ++i)
+  for (int i = 0; str[i] != '\0'; ++i)
     num_chars++;
 
   SDL_Rect bg = {x, y, 20 + num_chars * (4 * scale), 20 + (5 * scale)};
   SDL_FillSurfaceRect(surface, &bg, bg_color);
 
-  const Uint8 font[10][15] = {
+  const Uint8 font_0_9[10][15] = {
       {1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1}, // 0
       {0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0}, // 1
       {1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1}, // 2
@@ -532,20 +616,54 @@ void draw_text_widget(SDL_Surface *surface, int x, int y, Uint32 data) {
       {1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1}, // 8
       {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1}  // 9
   };
+  const Uint8 font_F[15] = {1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0};
+  const Uint8 font_I[15] = {1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1};
+  const Uint8 font_N[15] = {1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1};
+  const Uint8 font_D[15] = {1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0};
+  const Uint8 font_P[15] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0};
+  const Uint8 font_U[15] = {1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1};
+  const Uint8 font_T[15] = {1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0};
+  const Uint8 font_O[15] = {1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1};
+  const Uint8 font_SPACE[15] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  const Uint8 font_COLON[15] = {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0};
 
   int cursor_x = x + 10;
   int cursor_y = y + 10;
 
-  for (int i = 0; buf[i] != '\0'; ++i) {
-    if (buf[i] < '0' || buf[i] > '9')
-      continue;
-    int d = buf[i] - '0';
-    for (int y = 0; y < 5; ++y) {
-      for (int x = 0; x < 3; ++x) {
-        if (font[d][y * 3 + x]) {
-          SDL_Rect pixel = {cursor_x + x * scale, cursor_y + y * scale, scale,
-                            scale};
-          SDL_FillSurfaceRect(surface, &pixel, fg_color);
+  for (int i = 0; str[i] != '\0'; ++i) {
+    const Uint8 *c_font = nullptr;
+    if (str[i] >= '0' && str[i] <= '9') {
+      c_font = font_0_9[str[i] - '0'];
+    } else if (str[i] == 'F') {
+      c_font = font_F;
+    } else if (str[i] == 'I') {
+      c_font = font_I;
+    } else if (str[i] == 'N') {
+      c_font = font_N;
+    } else if (str[i] == 'D') {
+      c_font = font_D;
+    } else if (str[i] == 'P') {
+      c_font = font_P;
+    } else if (str[i] == 'U') {
+      c_font = font_U;
+    } else if (str[i] == 'T') {
+      c_font = font_T;
+    } else if (str[i] == 'O') {
+      c_font = font_O;
+    } else if (str[i] == ' ') {
+      c_font = font_SPACE;
+    } else if (str[i] == ':') {
+      c_font = font_COLON;
+    }
+
+    if (c_font) {
+      for (int y_pos = 0; y_pos < 5; ++y_pos) {
+        for (int x_pos = 0; x_pos < 3; ++x_pos) {
+          if (c_font[y_pos * 3 + x_pos]) {
+            SDL_Rect pixel = {cursor_x + x_pos * scale,
+                              cursor_y + y_pos * scale, scale, scale};
+            SDL_FillSurfaceRect(surface, &pixel, fg_color);
+          }
         }
       }
     }
