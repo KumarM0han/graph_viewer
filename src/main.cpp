@@ -6,6 +6,9 @@
 #include <SDL3/SDL.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <stdlib.h>
+#include <time.h>
+#include <vector>
 
 #define PROG_NAME "Graph Viewer"
 #define WIDTH (4 * 200)
@@ -32,8 +35,10 @@
 #define log(...) ((void)0)
 #endif
 
+template <typename T> struct UINode;
 void do_checks(SDL_Surface *);
-void draw(SDL_Surface *);
+void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, float, float,
+          float);
 
 template <typename T> struct UINode {
   T data;
@@ -41,26 +46,34 @@ template <typename T> struct UINode {
   float width, height;
   float border_thickness;
   Uint8 r, g, b, a;
+  bool selected = false;
 
-  void render(SDL_Surface *surface) const {
+  void render(SDL_Surface *surface, float offset_x, float offset_y,
+              float zoom) const {
     if (!surface)
       return;
 
-    float half_w = width / 2.0f;
-    float half_h = height / 2.0f;
+    float scaled_x = (x + offset_x) * zoom;
+    float scaled_y = (y + offset_y) * zoom;
+    float scaled_w = width * zoom;
+    float scaled_h = height * zoom;
+    float scaled_border = border_thickness * zoom;
 
-    float inner_half_w = half_w - border_thickness;
-    float inner_half_h = half_h - border_thickness;
+    float half_w = scaled_w / 2.0f;
+    float half_h = scaled_h / 2.0f;
+
+    float inner_half_w = half_w - scaled_border;
+    float inner_half_h = half_h - scaled_border;
 
     if (inner_half_w < 0.0f)
       inner_half_w = 0.0f;
     if (inner_half_h < 0.0f)
       inner_half_h = 0.0f;
 
-    int min_x = (int)(x - half_w - 1);
-    int max_x = (int)(x + half_w + 1);
-    int min_y = (int)(y - half_h - 1);
-    int max_y = (int)(y + half_h + 1);
+    int min_x = (int)(scaled_x - half_w - 1);
+    int max_x = (int)(scaled_x + half_w + 1);
+    int min_y = (int)(scaled_y - half_h - 1);
+    int max_y = (int)(scaled_y + half_h + 1);
 
     if (min_x < 0)
       min_x = 0;
@@ -79,8 +92,8 @@ template <typename T> struct UINode {
 
     for (int cy = min_y; cy <= max_y; ++cy) {
       for (int cx = min_x; cx <= max_x; ++cx) {
-        float dx = (float)cx - x;
-        float dy = (float)cy - y;
+        float dx = (float)cx - scaled_x;
+        float dy = (float)cy - scaled_y;
 
         // Use inclusive bounds for outer, exclusive for inner to create the
         // border
@@ -90,22 +103,45 @@ template <typename T> struct UINode {
                          dy > -inner_half_h && dy < inner_half_h);
 
         if (in_outer && !in_inner) {
+          Uint8 out_r = selected ? 255 : r;
+          Uint8 out_g = selected ? 255 : g;
+          Uint8 out_b = selected ? 0 : b;
 #ifndef DEBUG
           Uint8 *target_pixel = ((Uint8 *)surface->pixels +
                                  (cy * surface->pitch) + (cx * stride));
           // Note: Hardcoded RGB channel order, might need adaptation for
           // specific formats like BGRA
-          target_pixel[0] = r;
-          target_pixel[1] = g;
-          target_pixel[2] = b;
+          target_pixel[0] = out_r;
+          target_pixel[1] = out_g;
+          target_pixel[2] = out_b;
 #else
-          SDL_WriteSurfacePixel(surface, cx, cy, r, g, b, a);
+          SDL_WriteSurfacePixel(surface, cx, cy, out_r, out_g, out_b, a);
 #endif
         }
       }
     }
   }
 };
+
+std::vector<UINode<Uint32>> generate_random_nodes(int count, int max_w,
+                                                  int max_h) {
+  std::vector<UINode<Uint32>> nodes;
+  nodes.reserve(count);
+  for (int i = 0; i < count; ++i) {
+    Uint32 data = (Uint32)rand();
+    float x = (float)(rand() % max_w);
+    float y = (float)(rand() % max_h);
+    float w = 20.0f + (float)(rand() % 80);
+    float h = 20.0f + (float)(rand() % 80);
+    float t = 2.0f + (float)(rand() % 5);
+    Uint8 r = 255;
+    Uint8 g = 255;
+    Uint8 b = 255;
+
+    nodes.push_back({data, x, y, w, h, t, r, g, b, 255, false});
+  }
+  return nodes;
+}
 
 int main() {
   assert(SDL_Init(SDL_INIT_VIDEO));
@@ -119,19 +155,79 @@ int main() {
   assert(surface);
   do_checks(surface);
 
+  srand((unsigned int)time(NULL));
+  std::vector<UINode<Uint32>> nodes = generate_random_nodes(50, WIDTH, HEIGHT);
+
   bool quit = false;
+  float pan_x = 0.0f;
+  float pan_y = 0.0f;
+  float zoom = 1.0f;
+  bool is_dragging = false;
+
   while (!quit) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
+      } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+        if (event.wheel.y > 0)
+          zoom *= 1.1f;
+        else if (event.wheel.y < 0)
+          zoom /= 1.1f;
+
+        if (zoom < 0.1f)
+          zoom = 0.1f;
+        if (zoom > 10.0f)
+          zoom = 10.0f;
+      } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        if (event.button.button == SDL_BUTTON_LEFT) {
+          is_dragging = true;
+
+          float mx = event.button.x;
+          float my = event.button.y;
+          bool clicked_on_node = false;
+
+          for (int i = (int)nodes.size() - 1; i >= 0; --i) {
+            float scaled_x = (nodes[i].x + pan_x) * zoom;
+            float scaled_y = (nodes[i].y + pan_y) * zoom;
+            float scaled_w = nodes[i].width * zoom;
+            float scaled_h = nodes[i].height * zoom;
+
+            float hw = scaled_w / 2.0f;
+            float hh = scaled_h / 2.0f;
+
+            if (mx >= scaled_x - hw && mx <= scaled_x + hw &&
+                my >= scaled_y - hh && my <= scaled_y + hh) {
+
+              for (auto &n : nodes)
+                n.selected = false;
+              nodes[i].selected = true;
+              clicked_on_node = true;
+              break;
+            }
+          }
+
+          if (!clicked_on_node) {
+            for (auto &n : nodes)
+              n.selected = false;
+          }
+        }
+      } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (event.button.button == SDL_BUTTON_LEFT)
+          is_dragging = false;
+      } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+        if (is_dragging) {
+          pan_x += event.motion.xrel / zoom;
+          pan_y += event.motion.yrel / zoom;
+        }
       }
     }
 
     surface = SDL_GetWindowSurface(window);
     if (surface) {
-      draw(surface);
+      SDL_FillSurfaceRect(surface, NULL, 0); // Clear to black
       do_checks(surface);
+      draw(surface, nodes, pan_x, pan_y, zoom);
       SDL_UpdateWindowSurface(window);
     }
   }
@@ -152,7 +248,8 @@ void do_checks(SDL_Surface *surface) {
   return;
 }
 
-void draw(SDL_Surface *surface) {
+void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
+          float pan_x, float pan_y, float zoom) {
 #if 0
 #ifndef DEBUG
   void *pixels = surface->pixels;
@@ -177,12 +274,7 @@ void draw(SDL_Surface *surface) {
   }
 #endif
 
-  // Demo representation:
-  UINode<int> node1 = {1,    200.0f, 200.0f, 160.0f, 80.0f,
-                       8.0f, 255,    50,     50,     255};
-  node1.render(surface);
-
-  UINode<const char *> node2 = {"test", 450.0f, 300.0f, 120.0f, 60.0f,
-                                15.0f,  50,     255,    50,     255};
-  node2.render(surface);
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    nodes[i].render(surface, pan_x, pan_y, zoom);
+  }
 }
