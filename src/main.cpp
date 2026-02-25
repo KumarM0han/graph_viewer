@@ -248,7 +248,7 @@ int main() {
 
   srand((unsigned int)time(NULL));
   std::vector<UINode<Uint32>> nodes =
-      generate_random_nodes(100000, WIDTH, HEIGHT);
+      generate_random_nodes(20000, WIDTH, HEIGHT);
 
   // Apply OGDF overlap removal layout
   ogdf::Graph G;
@@ -422,12 +422,49 @@ void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
 
   static size_t last_visible_count = -1;
   if (visible.size() != last_visible_count) {
-    log("Rendering: %zu / %zu nodes (%.1f%%)\n", visible.size(), nodes.size(),
-        (float)visible.size() / nodes.size() * 100.0f);
+    if (visible.size() > 10000) {
+      log("Rendering Point Cloud Blob: %zu / %zu nodes (%.1f%%)\n",
+          visible.size(), nodes.size(),
+          (float)visible.size() / nodes.size() * 100.0f);
+    } else {
+      log("Rendering Detailed Nodes: %zu / %zu nodes (%.1f%%)\n",
+          visible.size(), nodes.size(),
+          (float)visible.size() / nodes.size() * 100.0f);
+    }
     last_visible_count = visible.size();
   }
 
-  for (int idx : visible) {
-    nodes[idx].render(surface, pan_x, pan_y, zoom);
+  if (visible.size() > 10000) {
+#ifndef DEBUG
+    SDL_PixelFormatDetails const *pixel_details =
+        SDL_GetPixelFormatDetails(surface->format);
+    Sint32 stride = pixel_details->bytes_per_pixel;
+#endif
+    for (int idx : visible) {
+      const auto &n = nodes[idx];
+      float scaled_x = (n.x + pan_x) * zoom;
+      float scaled_y = (n.y + pan_y) * zoom;
+      int cx = (int)scaled_x;
+      int cy = (int)scaled_y;
+
+      if (cx >= 0 && cx < surface->w && cy >= 0 && cy < surface->h) {
+        Uint8 out_r = n.selected ? 255 : n.r;
+        Uint8 out_g = n.selected ? 255 : n.g;
+        Uint8 out_b = n.selected ? 0 : n.b;
+#ifndef DEBUG
+        Uint8 *target_pixel =
+            ((Uint8 *)surface->pixels + (cy * surface->pitch) + (cx * stride));
+        target_pixel[0] = out_r;
+        target_pixel[1] = out_g;
+        target_pixel[2] = out_b;
+#else
+        SDL_WriteSurfacePixel(surface, cx, cy, out_r, out_g, out_b, n.a);
+#endif
+      }
+    }
+  } else {
+    for (int idx : visible) {
+      nodes[idx].render(surface, pan_x, pan_y, zoom);
+    }
   }
 }
