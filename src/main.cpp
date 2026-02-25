@@ -40,6 +40,7 @@
 template <typename T> struct UINode;
 struct QuadTree;
 void do_checks(SDL_Surface *);
+void draw_selected_node_widget(SDL_Surface *, Uint32);
 void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, const QuadTree &,
           float, float, float);
 
@@ -292,6 +293,8 @@ int main() {
   float pan_y = 0.0f;
   float zoom = 1.0f;
   bool is_dragging = false;
+  bool has_selection = false;
+  Uint32 selected_data = 0;
 
   while (!quit) {
     SDL_Event event;
@@ -340,6 +343,8 @@ int main() {
                 n.selected = false;
               nodes[i].selected = true;
               clicked_on_node = true;
+              has_selection = true;
+              selected_data = nodes[i].data;
               break;
             }
           }
@@ -347,6 +352,7 @@ int main() {
           if (!clicked_on_node) {
             for (auto &n : nodes)
               n.selected = false;
+            has_selection = false;
           }
         }
       } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
@@ -365,6 +371,11 @@ int main() {
       SDL_FillSurfaceRect(surface, NULL, 0); // Clear to black
       do_checks(surface);
       draw(surface, nodes, qtree, pan_x, pan_y, zoom);
+
+      if (has_selection) {
+        draw_selected_node_widget(surface, selected_data);
+      }
+
       SDL_UpdateWindowSurface(window);
     }
   }
@@ -466,5 +477,56 @@ void draw(SDL_Surface *surface, const std::vector<UINode<Uint32>> &nodes,
     for (int idx : visible) {
       nodes[idx].render(surface, pan_x, pan_y, zoom);
     }
+  }
+}
+
+void draw_selected_node_widget(SDL_Surface *surface, Uint32 data) {
+  const SDL_PixelFormatDetails *format =
+      SDL_GetPixelFormatDetails(surface->format);
+  Uint32 bg_color = SDL_MapRGB(format, NULL, 50, 50, 50);
+  Uint32 fg_color = SDL_MapRGB(format, NULL, 255, 255, 255);
+
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%u", data);
+
+  // Create a tight background box behind the number
+  int scale = 4;
+  int num_chars = 0;
+  for (int i = 0; buf[i] != '\0'; ++i)
+    num_chars++;
+
+  SDL_Rect bg = {10, 10, 20 + num_chars * (4 * scale), 20 + (5 * scale)};
+  SDL_FillSurfaceRect(surface, &bg, bg_color);
+
+  const Uint8 font[10][15] = {
+      {1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1}, // 0
+      {0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0}, // 1
+      {1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1}, // 2
+      {1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1}, // 3
+      {1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1}, // 4
+      {1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1}, // 5
+      {1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1}, // 6
+      {1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1}, // 7
+      {1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1}, // 8
+      {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1}  // 9
+  };
+
+  int cursor_x = 20;
+  int cursor_y = 20;
+
+  for (int i = 0; buf[i] != '\0'; ++i) {
+    if (buf[i] < '0' || buf[i] > '9')
+      continue;
+    int d = buf[i] - '0';
+    for (int y = 0; y < 5; ++y) {
+      for (int x = 0; x < 3; ++x) {
+        if (font[d][y * 3 + x]) {
+          SDL_Rect pixel = {cursor_x + x * scale, cursor_y + y * scale, scale,
+                            scale};
+          SDL_FillSurfaceRect(surface, &pixel, fg_color);
+        }
+      }
+    }
+    cursor_x += 4 * scale;
   }
 }
