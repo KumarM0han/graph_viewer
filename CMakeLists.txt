@@ -15,6 +15,8 @@ if(NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_library(SDL_LIB NAMES SDL3 PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/")
+find_library(OGDF_LIB NAMES OGDF PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/lib")
+find_library(COIN_LIB NAMES COIN PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/lib")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -32,11 +34,15 @@ target_include_directories(${PROJECT_NAME}
 	PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/src
 		${CMAKE_CURRENT_SOURCE_DIR}/vendor/
+		${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/include
+		${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/include/ogdf-release
 )
 
 target_link_libraries(${PROJECT_NAME}
 	PRIVATE
 		${SDL_LIB}
+		${OGDF_LIB}
+		${COIN_LIB}
 )
 
 if(MSVC)

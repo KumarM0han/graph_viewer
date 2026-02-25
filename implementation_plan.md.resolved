@@ -1,0 +1,25 @@
+# Integrating OGDF Library
+
+We will integrate the Open Graph Drawing Framework (OGDF) into your C++ project under the `vendor/` directory, keeping only the compiled library and headers to save space and compilation time.
+
+## Proposed Changes
+
+1. **Clone and Build OGDF**:
+   - Clone the OGDF repository (`https://github.com/ogdf/ogdf.git`) into a temporary folder in `vendor/`.
+   - Run `cmake` to configure and build OGDF in Release mode.
+   
+2. **Install and Clean Up**:
+   - Use `cmake --install` to extract only the compiled libraries (`.lib`/`.a`) and the `include/` directory into `vendor/ogdf`.
+   - Delete the enormous source tree and build artifacts so your repository focuses only on what's strictly necessary.
+
+3. **Update [CMakeLists.txt](file:///c:/Users/z004kv4t/Desktop/another_gui/graph_viewer/CMakeLists.txt)**:
+   - Add `vendor/ogdf/include` to `target_include_directories`.
+   - Find the compiled OGDF library in `vendor/ogdf/lib` or `vendor/ogdf/bin` and add it to `target_link_libraries`.
+
+## Verification Plan
+
+### Automated/Compiler Verification
+- Run `cmake --build .\build\` from your project root. If the project links successfully and can `#include <ogdf/basic/Graph.h>`, the integration is successful.
+
+### Manual Verification
+- We will instantiate a basic `ogdf::Graph` and `ogdf::GraphAttributes` in [main.cpp](file:///c:/Users/z004kv4t/Desktop/another_gui/graph_viewer/src/main.cpp) to ensure the symbols resolve at runtime and it doesn't crash on startup.

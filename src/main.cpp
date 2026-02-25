@@ -5,10 +5,12 @@
 
 #include <SDL3/SDL.h>
 #include <assert.h>
+#include <ogdf/basic/Graph.h>
+#include <ogdf/basic/GraphAttributes.h>
+#include <ogdf/energybased/NodeRespecterLayout.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <time.h>
-#include <vector>
 
 #define PROG_NAME "Graph Viewer"
 #define WIDTH (4 * 200)
@@ -156,7 +158,32 @@ int main() {
   do_checks(surface);
 
   srand((unsigned int)time(NULL));
-  std::vector<UINode<Uint32>> nodes = generate_random_nodes(50, WIDTH, HEIGHT);
+  std::vector<UINode<Uint32>> nodes =
+      generate_random_nodes(100000, WIDTH, HEIGHT);
+
+  // Apply OGDF overlap removal layout
+  ogdf::Graph G;
+  ogdf::GraphAttributes GA(G, ogdf::GraphAttributes::nodeGraphics);
+
+  std::vector<ogdf::node> ogdf_nodes;
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    ogdf::node n = G.newNode();
+    GA.x(n) = nodes[i].x;
+    GA.y(n) = nodes[i].y;
+    GA.width(n) = nodes[i].width + nodes[i].border_thickness * 2.0;
+    GA.height(n) = nodes[i].height + nodes[i].border_thickness * 2.0;
+    ogdf_nodes.push_back(n);
+  }
+
+  ogdf::NodeRespecterLayout layout;
+  // Some padding between components
+  layout.setMinDistCC(20.0);
+  layout.call(GA);
+
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    nodes[i].x = GA.x(ogdf_nodes[i]);
+    nodes[i].y = GA.y(ogdf_nodes[i]);
+  }
 
   bool quit = false;
   float pan_x = 0.0f;
