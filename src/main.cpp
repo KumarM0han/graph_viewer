@@ -328,12 +328,19 @@ int main() {
           float my = event.button.y;
           SDL_Surface *s = SDL_GetWindowSurface(window);
           SDL_Rect find_btn = {s ? s->w / 2 - 40 : WIDTH / 2 - 40, 10, 80, 40};
+          SDL_Rect reset_btn = {s ? s->w / 2 + 50 : WIDTH / 2 + 50, 10, 100,
+                                40};
 
           if (mx >= find_btn.x && mx <= find_btn.x + find_btn.w &&
               my >= find_btn.y && my <= find_btn.y + find_btn.h) {
             is_searching = true;
             search_len = 0;
             search_buffer[0] = '\0';
+          } else if (mx >= reset_btn.x && mx <= reset_btn.x + reset_btn.w &&
+                     my >= reset_btn.y && my <= reset_btn.y + reset_btn.h) {
+            zoom = 1.0f;
+            pan_x = 0.0f;
+            pan_y = 0.0f;
           } else {
             is_dragging = true;
             bool clicked_on_node = false;
@@ -455,6 +462,10 @@ int main() {
       // Draw Find button
       draw_string_widget(surface, surface->w / 2 - 40, 10, "FIND",
                          is_searching ? active_bg : bg_color, fg_color);
+
+      // Draw Reset button
+      draw_string_widget(surface, surface->w / 2 + 50, 10, "RESET", bg_color,
+                         fg_color);
 
       if (is_searching) {
         char input_buf[64];
@@ -620,6 +631,9 @@ void draw_string_widget(SDL_Surface *surface, int x, int y, const char *str,
   const Uint8 font_I[15] = {1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1};
   const Uint8 font_N[15] = {1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1};
   const Uint8 font_D[15] = {1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0};
+  const Uint8 font_R[15] = {1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1};
+  const Uint8 font_E[15] = {1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1};
+  const Uint8 font_S[15] = {1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1};
   const Uint8 font_P[15] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0};
   const Uint8 font_U[15] = {1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1};
   const Uint8 font_T[15] = {1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0};
@@ -642,6 +656,12 @@ void draw_string_widget(SDL_Surface *surface, int x, int y, const char *str,
       c_font = font_N;
     } else if (str[i] == 'D') {
       c_font = font_D;
+    } else if (str[i] == 'R') {
+      c_font = font_R;
+    } else if (str[i] == 'E') {
+      c_font = font_E;
+    } else if (str[i] == 'S') {
+      c_font = font_S;
     } else if (str[i] == 'P') {
       c_font = font_P;
     } else if (str[i] == 'U') {
