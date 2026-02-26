@@ -9,8 +9,12 @@
 #include <ogdf/basic/GraphAttributes.h>
 #include <ogdf/energybased/NodeRespecterLayout.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb_truetype.h>
 
 #define PROG_NAME "Graph Viewer"
 #define WIDTH (4 * 200)
@@ -41,6 +45,10 @@ template <typename T> struct UINode;
 struct QuadTree;
 void do_checks(SDL_Surface *);
 void draw_string_widget(SDL_Surface *, int, int, const char *, Uint32, Uint32);
+void draw_ttf_widget(SDL_Surface *, int, int, const char *, stbtt_fontinfo *,
+                     Uint32, Uint32);
+void draw_ui_widget(SDL_Surface *, int, int, const char *, stbtt_fontinfo *,
+                    Uint32, Uint32);
 void draw(SDL_Surface *, const std::vector<UINode<Uint32>> &, const QuadTree &,
           float, float, float);
 
@@ -251,6 +259,25 @@ int main() {
   std::vector<UINode<Uint32>> nodes =
       generate_random_nodes(20000, WIDTH, HEIGHT);
 
+  unsigned char *ttf_buffer = NULL;
+  stbtt_fontinfo font_info;
+  bool has_font = false;
+  FILE *f = fopen("static/Consolas-Regular.ttf", "rb");
+  if (f) {
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    ttf_buffer = (unsigned char *)malloc(size);
+    fread(ttf_buffer, 1, size, f);
+    fclose(f);
+    if (stbtt_InitFont(&font_info, ttf_buffer,
+                       stbtt_GetFontOffsetForIndex(ttf_buffer, 0))) {
+      has_font = true;
+    }
+  } else {
+    log("Failed to load static/Consolas-Regular.ttf\n");
+  }
+
   // Apply OGDF overlap removal layout
   ogdf::Graph G;
   ogdf::GraphAttributes GA(G, ogdf::GraphAttributes::nodeGraphics);
@@ -456,27 +483,30 @@ int main() {
       if (has_selection) {
         char buf[32];
         snprintf(buf, sizeof(buf), "%u", selected_data);
-        draw_string_widget(surface, 10, 10, buf, bg_color, fg_color);
+        draw_ui_widget(surface, 10, 10, buf, has_font ? &font_info : NULL,
+                       bg_color, fg_color);
       }
 
       // Draw Find button
-      draw_string_widget(surface, surface->w / 2 - 40, 10, "FIND",
-                         is_searching ? active_bg : bg_color, fg_color);
+      draw_ui_widget(surface, surface->w / 2 - 40, 10, "FIND",
+                     has_font ? &font_info : NULL,
+                     is_searching ? active_bg : bg_color, fg_color);
 
       // Draw Reset button
-      draw_string_widget(surface, surface->w / 2 + 50, 10, "RESET", bg_color,
-                         fg_color);
+      draw_ui_widget(surface, surface->w / 2 + 50, 10, "RESET",
+                     has_font ? &font_info : NULL, bg_color, fg_color);
 
       if (is_searching) {
         char input_buf[64];
         snprintf(input_buf, sizeof(input_buf), "INPUT: %s", search_buffer);
-        draw_string_widget(surface, surface->w / 2 - (10 * 4 * 4), 60,
-                           input_buf, active_bg, fg_color);
+        draw_ui_widget(surface, surface->w / 2 - (10 * 4 * 4), 60, input_buf,
+                       has_font ? &font_info : NULL, active_bg, fg_color);
       } else if (search_failed_time > 0) {
         if (SDL_GetTicks() - search_failed_time < 2000) {
           Uint32 error_bg = SDL_MapRGB(format, NULL, 180, 50, 50);
-          draw_string_widget(surface, surface->w / 2 - (9 * 4 * 4 / 2), 60,
-                             "NOT FOUND", error_bg, fg_color);
+          draw_ui_widget(surface, surface->w / 2 - (9 * 4 * 4 / 2), 60,
+                         "NOT FOUND", has_font ? &font_info : NULL, error_bg,
+                         fg_color);
         } else {
           search_failed_time = 0;
         }
@@ -504,6 +534,9 @@ int main() {
       SDL_Delay(16 - frame_time);
     }
   }
+
+  if (ttf_buffer)
+    free(ttf_buffer);
 
   SDL_DestroyWindow(window);
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -688,5 +721,93 @@ void draw_string_widget(SDL_Surface *surface, int x, int y, const char *str,
       }
     }
     cursor_x += 4 * scale;
+  }
+}
+
+void draw_ttf_widget(SDL_Surface *surface, int x, int y, const char *text,
+                     stbtt_fontinfo *font, Uint32 bg_color, Uint32 fg_color) {
+  float scale = stbtt_ScaleForPixelHeight(font, 24.0f);
+  int ascent, descent, lineGap;
+  stbtt_GetFontVMetrics(font, &ascent, &descent, &lineGap);
+  ascent = (int)(ascent * scale);
+  descent = (int)(descent * scale);
+
+  int text_w = 0;
+  for (int i = 0; text[i]; ++i) {
+    int advanceX, leftBearing;
+    stbtt_GetCodepointHMetrics(font, text[i], &advanceX, &leftBearing);
+    text_w += (int)(advanceX * scale);
+    if (text[i + 1]) {
+      text_w +=
+          (int)(stbtt_GetCodepointKernAdvance(font, text[i], text[i + 1]) *
+                scale);
+    }
+  }
+
+  SDL_Rect bg = {x, y, text_w + 20, ascent - descent + 20};
+  SDL_FillSurfaceRect(surface, &bg, bg_color);
+
+  int cursor_x = x + 10;
+  int cursor_y = y + 10 + ascent;
+
+  SDL_PixelFormatDetails const *pixel_details =
+      SDL_GetPixelFormatDetails(surface->format);
+  Sint32 stride = pixel_details->bytes_per_pixel;
+
+  Uint8 fg_r, fg_g, fg_b;
+  SDL_GetRGB(fg_color, pixel_details, NULL, &fg_r, &fg_g, &fg_b);
+  Uint8 bg_r, bg_g, bg_b;
+  SDL_GetRGB(bg_color, pixel_details, NULL, &bg_r, &bg_g, &bg_b);
+
+  for (int i = 0; text[i]; ++i) {
+    int advanceX, leftBearing;
+    stbtt_GetCodepointHMetrics(font, text[i], &advanceX, &leftBearing);
+
+    int x0, y0, x1, y1;
+    stbtt_GetCodepointBitmapBox(font, text[i], scale, scale, &x0, &y0, &x1,
+                                &y1);
+
+    int w = x1 - x0;
+    int h = y1 - y0;
+
+    if (w > 0 && h > 0) {
+      unsigned char *bitmap = (unsigned char *)malloc(w * h);
+      stbtt_MakeCodepointBitmap(font, bitmap, w, h, w, scale, scale, text[i]);
+
+      for (int py = 0; py < h; ++py) {
+        for (int px = 0; px < w; ++px) {
+          unsigned char alpha = bitmap[py * w + px];
+          if (alpha > 0) {
+            int draw_x = cursor_x + x0 + px;
+            int draw_y = cursor_y + y0 + py;
+            if (draw_x >= 0 && draw_x < surface->w && draw_y >= 0 &&
+                draw_y < surface->h) {
+              float a = alpha / 255.0f;
+              Uint8 out_r = (Uint8)(fg_r * a + bg_r * (1.0f - a));
+              Uint8 out_g = (Uint8)(fg_g * a + bg_g * (1.0f - a));
+              Uint8 out_b = (Uint8)(fg_b * a + bg_b * (1.0f - a));
+              SDL_WriteSurfacePixel(surface, draw_x, draw_y, out_r, out_g,
+                                    out_b, 255);
+            }
+          }
+        }
+      }
+      free(bitmap);
+    }
+    cursor_x += (int)(advanceX * scale);
+    if (text[i + 1]) {
+      cursor_x +=
+          (int)(stbtt_GetCodepointKernAdvance(font, text[i], text[i + 1]) *
+                scale);
+    }
+  }
+}
+
+void draw_ui_widget(SDL_Surface *surface, int x, int y, const char *text,
+                    stbtt_fontinfo *font, Uint32 bg_color, Uint32 fg_color) {
+  if (font) {
+    draw_ttf_widget(surface, x, y, text, font, bg_color, fg_color);
+  } else {
+    draw_string_widget(surface, x, y, text, bg_color, fg_color);
   }
 }
