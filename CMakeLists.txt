@@ -14,9 +14,50 @@ if(NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 
+include(FetchContent)
+
+# Resolve SDL3
 find_library(SDL_LIB NAMES SDL3 PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/")
+if(SDL_LIB)
+    message(STATUS "Found local static SDL3: ${SDL_LIB}")
+else()
+    message(STATUS "Local SDL3 not found. Fetching and building from source...")
+    set(SDL_SHARED OFF CACHE BOOL "Build SDL shared" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "Build SDL static" FORCE)
+    FetchContent_Declare(
+        SDL
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG preview-3.1.6
+    )
+    FetchContent_MakeAvailable(SDL)
+    set(SDL_LIB SDL3::SDL3-static)
+endif()
+
+# Resolve OGDF
 find_library(OGDF_LIB NAMES OGDF PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/lib")
 find_library(COIN_LIB NAMES COIN PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/lib")
+
+if(OGDF_LIB)
+    message(STATUS "Found local static OGDF: ${OGDF_LIB}")
+    set(OGDF_LIBRARIES ${OGDF_LIB})
+    if(COIN_LIB)
+        list(APPEND OGDF_LIBRARIES ${COIN_LIB})
+    endif()
+    set(OGDF_INCLUDES
+        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/include/ogdf-release"
+    )
+else()
+    message(STATUS "Local OGDF not found. Fetching and building from source (may take a while)...")
+    FetchContent_Declare(
+        ogdf
+        GIT_REPOSITORY https://github.com/ogdf/ogdf.git
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(ogdf)
+    set(OGDF_LIBRARIES ogdf)
+    set(OGDF_INCLUDES "")
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -24,25 +65,19 @@ set(SOURCES
 	src/main.cpp
 )
 
-#if(WIN32)
-#	add_executable(${PROJECT_NAME} WIN32 ${SOURCES})
-#else()
 add_executable(${PROJECT_NAME} ${SOURCES})
-#endif()
 
 target_include_directories(${PROJECT_NAME}
 	PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/src
 		${CMAKE_CURRENT_SOURCE_DIR}/vendor/
-		${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/include
-		${CMAKE_CURRENT_SOURCE_DIR}/vendor/ogdf/include/ogdf-release
+		${OGDF_INCLUDES}
 )
 
 target_link_libraries(${PROJECT_NAME}
 	PRIVATE
 		${SDL_LIB}
-		${OGDF_LIB}
-		${COIN_LIB}
+		${OGDF_LIBRARIES}
 )
 
 if(MSVC)
