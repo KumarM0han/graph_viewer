@@ -3,3 +3,5 @@ build/
 vendor/ogdf/lib/*
 static/*.md
 cdb_dod_integration.md
+*.lib
+*.dll
