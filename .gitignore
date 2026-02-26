@@ -1,4 +1,3 @@
 build/
 .cache
-*.dll
-*.lib
+vendor/ogdf/lib/
